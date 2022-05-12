@@ -6,12 +6,13 @@ import os
 import random
 import time
 from sys import platform
+import sys
 from Crypto.Cipher import ARC4
 
 import requests
 
 if platform != "win32":
-    import readline
+    import readline  # type: ignore
 
 
 class XiaomiCloudConnector:
@@ -220,67 +221,62 @@ class XiaomiCloudConnector:
 def print_tabbed(value, tab):
     print(" " * tab + value)
 
-
 def print_entry(key, value, tab):
     if value:
         print_tabbed(f'{key + ":": <10}{value}', tab)
 
+def stderr_print(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
-servers = ["cn", "de", "us", "ru", "tw", "sg", "in", "i2"]
-servers_str = ", ".join(servers)
-print("Username (email or user ID):")
-username = input()
-print("Password:")
-password = input()
-print(f"Server (one of: {servers_str}) Leave empty to check all available:")
-server = input()
-while server not in ["", *servers]:
-    print(f"Invalid server provided. Valid values: {servers_str}")
-    print("Server:")
-    server = input()
+server = os.getenv('MI_SERVER')
+username = os.getenv('MI_USERNAME')
+password = os.getenv('MI_PASSWORD')
 
-print()
-if not server == "":
-    servers = [server]
+if not username or not password or not server:
+    stderr_print('Specify environment variables MI_USERNAME, MI_PASSWORD, and MI_SERVER')
+    sys.exit(1)
+
+servers = [server]
 
 connector = XiaomiCloudConnector(username, password)
-print("Logging in...")
+stderr_print("Logging in...")
 logged = connector.login()
 if logged:
-    print("Logged in.")
-    print()
+    devices = []
     for current_server in servers:
-        devices = connector.get_devices(current_server)
-        if devices is not None:
-            if len(devices["result"]["list"]) == 0:
-                print(f"No devices found for server \"{current_server}\".")
+        stderr_print(f'Requesting devices for server: {current_server}')
+        items = connector.get_devices(current_server)
+        if items is not None:
+            if len(items["result"]["list"]) == 0:
+                stderr_print(f"No devices found for server \"{current_server}\".")
                 continue
-            print(f"Devices found for server \"{current_server}\":")
-            for device in devices["result"]["list"]:
-                print_tabbed("---------", 3)
-                if "name" in device:
-                    print_entry("NAME", device["name"], 3)
-                if "did" in device:
-                    print_entry("ID", device["did"], 3)
-                    if "blt" in device["did"]:
-                        beaconkey = connector.get_beaconkey(current_server, device["did"])
-                        if beaconkey and "result" in beaconkey and "beaconkey" in beaconkey["result"]:
-                            print_entry("BLE KEY", beaconkey["result"]["beaconkey"], 3)
-                if "mac" in device:
-                    print_entry("MAC", device["mac"], 3)
-                if "localip" in device:
-                    print_entry("IP", device["localip"], 3)
-                if "token" in device:
-                    print_entry("TOKEN", device["token"], 3)
-                if "model" in device:
-                    print_entry("MODEL", device["model"], 3)
-            print_tabbed("---------", 3)
-            print()
-        else:
-            print(f"Unable to get devices from server {current_server}.")
-else:
-    print("Unable to log in.")
 
-print()
-print("Press ENTER to finish")
-input()
+            for item in items["result"]["list"]:
+                device = {}
+
+                if "name" in item:
+                    device['name'] = item['name']
+                if "did" in item:
+                    device['id'] = item["did"]
+                    if "blt" in item["did"]:
+                        beaconkey = connector.get_beaconkey(current_server, item["did"])
+                        if beaconkey and "result" in beaconkey and "beaconkey" in beaconkey["result"]:
+                            device['beacon_key'] = beaconkey["result"]["beaconkey"]
+                if "mac" in item:
+                    device['mac'] = item["mac"]
+                if "localip" in item:
+                    device['local_ip'] = item["localip"]
+                if "token" in item:
+                    device['token'] = item["token"]
+                if "model" in item:
+                    device['model'] = item["model"]
+
+                devices.append(device)
+        else:
+            stderr_print(f"Unable to get devices from server {current_server}.")
+            sys.exit(1)
+
+    print(json.dumps(devices))
+else:
+    stderr_print("Unable to log in.")
+    sys.exit(1)
